@@ -4,7 +4,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QCloseEvent>
-#include <detectors.h>
+#include <detector.h>
 
 Dialog::Dialog(QWidget *parent) :
     QDialog(parent),
@@ -40,7 +40,7 @@ void Dialog::on_playPushButton_pressed()
     }
     else
     {
-        detect(videoPath);
+        detector(videoPath);
 
     }
 
@@ -60,7 +60,7 @@ void Dialog::closeEvent(QCloseEvent *event)
     }
 }
 
-void Dialog::detect(QString videoPath)
+void Dialog::detector(QString videoPath)
 {
     detect(videoPath);
 }

@@ -16,7 +16,7 @@ public:
     explicit Dialog(QWidget *parent = 0);
     ~Dialog();
 
-    void detect(QString videoPath);
+    void detector(QString videoPath);
 
 private slots:
     void on_browsePushButton_pressed();

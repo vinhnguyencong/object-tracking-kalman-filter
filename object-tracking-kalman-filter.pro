@@ -19,9 +19,9 @@ TEMPLATE = app
 
 SOURCES += main.cpp\
         dialog.cpp \
-    detectors.cpp
+        detector.cpp
 
 HEADERS  += dialog.h \
-    detectors.h
+    detector.h
 
 FORMS    += dialog.ui
