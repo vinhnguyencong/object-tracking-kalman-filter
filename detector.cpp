@@ -9,19 +9,18 @@ using namespace cv;
 using namespace std;
 
 //our sensitivity value to be used in the absdiff() function
-const static int SENSITIVITY_VALUE = 50;
+const static int SENSITIVITY_VALUE = 40;
 //size of blur used to smooth the intensity image output from absdiff() function
 const static int BLUR_SIZE = 10;
 //we'll have just one object to search for
 //and keep track of its position.
-int theObject[2] = {0,0};
+float theObject[2] = {0,0};
 //bounding rectangle of the object, we will use the center of this as its position.
 Rect objectBoundingRectangle = Rect(0,0,0,0);
 
 //int to string helper function
 string intToString(int number)
 {
-
     //this function has a number input and string output
     std::stringstream ss;
     ss << number;
@@ -44,6 +43,64 @@ void detect(QString videoPath)
     Mat differenceImage;
     //thresholded difference image (for use in findContours() function)
     Mat thresholdImage;
+
+    // Kalman Filter
+    int stateSize = 6;
+    int measSize = 4;
+    int contrSize = 0;
+
+
+    unsigned int type = CV_32F;
+    KalmanFilter kf(stateSize, measSize, contrSize, type);
+
+    Mat state(stateSize, 1, type);  // [x,y,v_x,v_y,w,h]
+    Mat meas(measSize, 1, type);    // [z_x,z_y,z_w,z_h]
+
+    //Mat procNoise(stateSize, 1, type);
+    // [E_x,E_y,E_v_x,E_v_y,E_w,E_h]
+
+    // Transition State Matrix A
+    // Note: set dT at each processing step!
+    // [ 1 0 dT 0  0 0 ]
+    // [ 0 1 0  dT 0 0 ]
+    // [ 0 0 1  0  0 0 ]
+    // [ 0 0 0  1  0 0 ]
+    // [ 0 0 0  0  1 0 ]
+    // [ 0 0 0  0  0 1 ]
+    cv::setIdentity(kf.transitionMatrix);
+
+    // Measure Matrix H
+    // [ 1 0 0 0 0 0 ]
+    // [ 0 1 0 0 0 0 ]
+    // [ 0 0 0 0 1 0 ]
+    // [ 0 0 0 0 0 1 ]
+    kf.measurementMatrix = cv::Mat::zeros(measSize, stateSize, type);
+    kf.measurementMatrix.at<float>(0) = 1.0f;
+    kf.measurementMatrix.at<float>(7) = 1.0f;
+    kf.measurementMatrix.at<float>(16) = 1.0f;
+    kf.measurementMatrix.at<float>(23) = 1.0f;
+
+    // Process Noise Covariance Matrix Q
+    // [ Ex   0   0     0     0    0  ]
+    // [ 0    Ey  0     0     0    0  ]
+    // [ 0    0   Ev_x  0     0    0  ]
+    // [ 0    0   0     Ev_y  0    0  ]
+    // [ 0    0   0     0     Ew   0  ]
+    // [ 0    0   0     0     0    Eh ]
+    //cv::setIdentity(kf.processNoiseCov, cv::Scalar(1e-2));
+    kf.processNoiseCov.at<float>(0) = 1e-2;
+    kf.processNoiseCov.at<float>(7) = 1e-2;
+    kf.processNoiseCov.at<float>(14) = 5.0f;
+    kf.processNoiseCov.at<float>(21) = 5.0f;
+    kf.processNoiseCov.at<float>(28) = 1e-2;
+    kf.processNoiseCov.at<float>(35) = 1e-2;
+
+    // Measures Noise Covariance Matrix R
+    cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(1e-1));
+    // End Kalman Filter
+
+    // Transition matrix ( eg. p(k) = p(k-1) + v(k-1)*dT ), init dT = 1
+    double dT = 0.05;  // assume ~20fps
 
     ///////////
     /// \brief stdstrVideoPath
@@ -69,6 +126,8 @@ void detect(QString videoPath)
             cv::absdiff(grayImage1,grayImage2,differenceImage);
             //threshold intensity image at a given sensitivity value
             cv::threshold(differenceImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
+            //cv::threshold(grayImage1,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
+
             //blur the image to get rid of the noise. This will output an intensity image
             cv::blur(thresholdImage,thresholdImage,cv::Size(BLUR_SIZE,BLUR_SIZE));
             //threshold again to obtain binary image from blur output
@@ -87,41 +146,107 @@ void detect(QString videoPath)
                 findContours(temp,contours,hierarchy,CV_RETR_EXTERNAL,CV_CHAIN_APPROX_SIMPLE );// retrieves external contours
 
                 //if contours vector is not empty, we have found some objects
-                if(contours.size() > 0)objectDetected=true;
-                else objectDetected = false;
+                if(contours.size() > 0)
+                    objectDetected=true;
+                else
+                    objectDetected = false;
+
 
                 if(objectDetected)
                 {
+                    vector<Rect> boundRect(contours.size());
+                    vector<float>radius( contours.size() );
+                    vector<Point2f>center( contours.size() );
+                    RNG rng(12345);
+
+                    for (size_t i = 0; i < contours.size(); i++)
+                    {
+                        boundRect[i] = boundingRect(Mat(contours[i]));
+                        minEnclosingCircle( (Mat)contours[i], center[i], radius[i] );
+                        drawContours(frame1, contours,  int (i), Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) ) );
+
+//                        if (radius[i] > 10)
+//                        {
+//                            Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+//                            rectangle( frame1, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0 );
+//                        }
+                    }
+
                     //the largest contour is found at the end of the contours vector
                     //we will simply assume that the biggest contour is the object we are looking for.
-                    vector< vector<Point> > largestContourVec;
-                    largestContourVec.push_back(contours.at(contours.size()-1));
-                    //make a bounding rectangle around the largest contour then find its centroid
-                    //this will be the object's final estimated position.
-                    objectBoundingRectangle = boundingRect(largestContourVec.at(0));
-                    int xpos = objectBoundingRectangle.x + objectBoundingRectangle.width/2;
-                    int ypos = objectBoundingRectangle.y + objectBoundingRectangle.height/2;
+//                    vector< vector<Point> > largestContourVec;
+//                    largestContourVec.push_back(contours.at(contours.size()-1));
+//                    //make a bounding rectangle around the largest contour then find its centroid
+//                    //this will be the object's final estimated position.
+//                    objectBoundingRectangle = boundingRect(largestContourVec.at(0));
+//                    int xpos = objectBoundingRectangle.x + objectBoundingRectangle.width/2;
+//                    int ypos = objectBoundingRectangle.y + objectBoundingRectangle.height/2;
 
-                    //update the objects positions by changing the 'theObject' array values
-                    theObject[0] = xpos , theObject[1] = ypos;
+//                    //update the objects positions by changing the 'theObject' array values
+//                    theObject[0] = xpos , theObject[1] = ypos;
+
+//                    kf.transitionMatrix.at<float>(2) = dT;
+//                    kf.transitionMatrix.at<float>(9) = dT;
+
+//                    state = kf.predict();
+//                    cv::Rect predRect;
+//                    predRect.width = state.at<float>(4);
+//                    predRect.height = state.at<float>(5);
+//                    predRect.x = state.at<float>(0) - predRect.width / 2;
+//                    predRect.y = state.at<float>(1) - predRect.height / 2;
+
+//                    cv::Point center;
+//                    center.x = state.at<float>(0);
+//                    center.y = state.at<float>(1);
+//                    //cv::circle(frame1, center, 2, CV_RGB(255,0,0), -1);
+
+//                    cv::rectangle(frame1, predRect, CV_RGB(255,0,0), 2);
                 }
+
                 //make some temp x and y variables so we dont have to type out so much
-                int x = theObject[0];
-                int y = theObject[1];
+//                int x = theObject[0];
+//                int y = theObject[1];
+                meas.at<float>(0) = theObject[0];
+                meas.at<float>(1) = theObject[1];
+                meas.at<float>(2) = (float)objectBoundingRectangle.width;
+                meas.at<float>(3) = (float)objectBoundingRectangle.height;
+
+                // >>>> Initialization
+                kf.errorCovPre.at<float>(0) = 1; // px
+                kf.errorCovPre.at<float>(7) = 1; // px
+                kf.errorCovPre.at<float>(14) = 1;
+                kf.errorCovPre.at<float>(21) = 1;
+                kf.errorCovPre.at<float>(28) = 1; // px
+                kf.errorCovPre.at<float>(35) = 1; // px
+
+                state.at<float>(0) = meas.at<float>(0);
+                state.at<float>(1) = meas.at<float>(1);
+                state.at<float>(2) = 0;
+                state.at<float>(3) = 0;
+                state.at<float>(4) = meas.at<float>(2);
+                state.at<float>(5) = meas.at<float>(3);
+                // <<<< Initialization
+
+                kf.statePost = state;
+
 
                 //draw some crosshairs around the object
-                circle(frame1,Point(x,y),40,Scalar(0,255,0),2);
-//                line(frame1,Point(x,y),Point(x,y-25),Scalar(0,255,0),2);
-//                line(frame1,Point(x,y),Point(x,y+25),Scalar(0,255,0),2);
-//                line(frame1,Point(x,y),Point(x-25,y),Scalar(0,255,0),2);
-//                line(frame1,Point(x,y),Point(x+25,y),Scalar(0,255,0),2);
+               // circle(frame1,Point(state.at<float>(0), state.at<float>(1)), 40,Scalar(0,255,0),2);
+
+                Rect etm;
+                etm.width = state.at<float>(4);
+                etm.height = state.at<float>(5);
+                etm.x = state.at<float>(0) - etm.width / 2;
+                etm.y = state.at<float>(1) - etm.height / 2;
+                rectangle(frame1, etm, Scalar(0,255,0), 1, CV_AA, 0);
 
                 //write the position of the object to the screen
-                putText(frame1,"Tracking object at (" + intToString(x)+","+intToString(y)+")",Point(x,y),1,1,Scalar(255,0,0),2);
+                putText(frame1,"Tracking object at (" + intToString(state.at<float>(0))+","+intToString(state.at<float>(1))+")",Point(state.at<float>(0), state.at<float>(1)),1,1,Scalar(255,0,0),2);
             }
             //show our captured frame
-            imshow("Frame1",frame1);
-            switch(waitKey(10)){
+            namedWindow( "Display window", WINDOW_AUTOSIZE );
+            imshow("Display window",frame1);
+            switch(waitKey(60)){
             case 116: //'t' has been pressed. this will toggle tracking
                 trackingEnabled = !trackingEnabled;
                 if(trackingEnabled == false) cout<<"Tracking disabled."<<endl;
