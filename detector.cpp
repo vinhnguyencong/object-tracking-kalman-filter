@@ -9,7 +9,7 @@ using namespace cv;
 using namespace std;
 
 //our sensitivity value to be used in the absdiff() function
-const static int SENSITIVITY_VALUE = 40;
+const static int SENSITIVITY_VALUE = 20;
 //size of blur used to smooth the intensity image output from absdiff() function
 const static int BLUR_SIZE = 10;
 //we'll have just one object to search for
@@ -25,6 +25,15 @@ string intToString(int number)
     std::stringstream ss;
     ss << number;
     return ss.str();
+}
+
+void onmouse(int event, int x, int y, int, void*)
+{
+    if( event == EVENT_LBUTTONDOWN )
+    {
+        theObject[0] = x;
+        theObject[1] = y;
+    }
 }
 
 void detect(QString videoPath)
@@ -108,6 +117,9 @@ void detect(QString videoPath)
     string stdstrVideoPath = videoPath.toUtf8().constData();
     // Open video file
     VideoCapture video(stdstrVideoPath);
+    namedWindow( "Display window", WINDOW_AUTOSIZE );
+
+    //setMouseCallback("Display window", onmouse, 0);
 
     for(;;)
     {
@@ -125,14 +137,24 @@ void detect(QString videoPath)
             //do not confuse this with a threshold image, we will need to perform thresholding afterwards.
             cv::absdiff(grayImage1,grayImage2,differenceImage);
             //threshold intensity image at a given sensitivity value
-            cv::threshold(differenceImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
-            //cv::threshold(grayImage1,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
+            //cv::threshold(differenceImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
+
+            Canny(grayImage1, grayImage1, 10, 150, 3);
+            cv::threshold(grayImage1,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
 
             //blur the image to get rid of the noise. This will output an intensity image
-            cv::blur(thresholdImage,thresholdImage,cv::Size(BLUR_SIZE,BLUR_SIZE));
+            //cv::blur(thresholdImage,thresholdImage,cv::Size(BLUR_SIZE,BLUR_SIZE));
             //threshold again to obtain binary image from blur output
-            cv::threshold(thresholdImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
+            //cv::threshold(thresholdImage,thresholdImage,SENSITIVITY_VALUE,255,THRESH_BINARY);
             //if tracking enabled, search for contours in our thresholded image
+            imshow("thr", thresholdImage);
+
+            cv::Mat structuringElement5x5 = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9));
+
+            cv::dilate(thresholdImage, thresholdImage, structuringElement5x5);
+            cv::dilate(thresholdImage, thresholdImage, structuringElement5x5);
+            cv::erode(thresholdImage, thresholdImage, structuringElement5x5);
+
             if(trackingEnabled)
             {
                 bool objectDetected = false;
@@ -145,12 +167,23 @@ void detect(QString videoPath)
                 //findContours(temp,contours,hierarchy,CV_RETR_CCOMP,CV_CHAIN_APPROX_SIMPLE );// retrieves all contours
                 findContours(temp,contours,hierarchy,CV_RETR_EXTERNAL,CV_CHAIN_APPROX_SIMPLE );// retrieves external contours
 
+//                Canny(grayImage1, grayImage1, 10, 150, 3);
+//                cv::threshold(grayImage1, grayImage1,SENSITIVITY_VALUE,255,THRESH_BINARY);
+//                //imshow("tem", grayImage1);
+//                findContours(grayImage1,contours,hierarchy,CV_RETR_EXTERNAL,CV_CHAIN_APPROX_SIMPLE );
+
+
+//                setMouseCallback("Display window", onmouse, 0);
+//                cv::Point center;
+//                center.x = theObject[0];
+//                center.y = theObject[1];
+//                cv::circle(frame1, center, 20, CV_RGB(255,0,0), -1);
+
                 //if contours vector is not empty, we have found some objects
                 if(contours.size() > 0)
                     objectDetected=true;
                 else
                     objectDetected = false;
-
 
                 if(objectDetected)
                 {
@@ -158,12 +191,17 @@ void detect(QString videoPath)
                     vector<float>radius( contours.size() );
                     vector<Point2f>center( contours.size() );
                     RNG rng(12345);
+                    vector<vector<Point> >hull( contours.size() );
 
                     for (size_t i = 0; i < contours.size(); i++)
                     {
-                        boundRect[i] = boundingRect(Mat(contours[i]));
-                        minEnclosingCircle( (Mat)contours[i], center[i], radius[i] );
-                        drawContours(frame1, contours,  int (i), Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) ) );
+                        convexHull( Mat(contours[i]), hull[i], false );
+
+//                        boundRect[i] = boundingRect(Mat(contours[i]));
+//                        minEnclosingCircle( (Mat)contours[i], center[i], radius[i] );
+//                        drawContours(frame1, contours,  int (i), Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) ) );
+                        drawContours(frame1, hull,  int (i), Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) ) );
+
 
 //                        if (radius[i] > 10)
 //                        {
@@ -196,11 +234,10 @@ void detect(QString videoPath)
 //                    predRect.y = state.at<float>(1) - predRect.height / 2;
 
 //                    cv::Point center;
-//                    center.x = state.at<float>(0);
-//                    center.y = state.at<float>(1);
-//                    //cv::circle(frame1, center, 2, CV_RGB(255,0,0), -1);
-
-//                    cv::rectangle(frame1, predRect, CV_RGB(255,0,0), 2);
+//                    center.x = theObject[0];
+//                    center.y = theObject[1];
+//                    cv::circle(frame1, center, 2, CV_RGB(255,0,0), -1);
+                    //cv::rectangle(frame1, predRect, CV_RGB(255,0,0), 2);
                 }
 
                 //make some temp x and y variables so we dont have to type out so much
@@ -244,9 +281,9 @@ void detect(QString videoPath)
                 putText(frame1,"Tracking object at (" + intToString(state.at<float>(0))+","+intToString(state.at<float>(1))+")",Point(state.at<float>(0), state.at<float>(1)),1,1,Scalar(255,0,0),2);
             }
             //show our captured frame
-            namedWindow( "Display window", WINDOW_AUTOSIZE );
+            //namedWindow( "Display window", WINDOW_AUTOSIZE );
             imshow("Display window",frame1);
-            switch(waitKey(60)){
+            switch(waitKey(100)){
             case 116: //'t' has been pressed. this will toggle tracking
                 trackingEnabled = !trackingEnabled;
                 if(trackingEnabled == false) cout<<"Tracking disabled."<<endl;

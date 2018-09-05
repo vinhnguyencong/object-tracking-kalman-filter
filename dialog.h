@@ -20,14 +20,13 @@ public:
 
 private slots:
     void on_browsePushButton_pressed();
-
     void on_playPushButton_pressed();
 
 private:
     Ui::Dialog *ui;
 
 protected:
-void closeEvent(QCloseEvent *event);
+    void closeEvent(QCloseEvent *event);
 
 };
 
