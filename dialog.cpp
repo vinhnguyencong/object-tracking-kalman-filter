@@ -30,7 +30,7 @@ void Dialog::on_browsePushButton_pressed()
 void Dialog::on_playPushButton_pressed()
 {
 
-    //std::string videoPath = ui->VideoURLLineEdit->text().toStdString();
+    // Get path to Video
     QString videoPath = ui->VideoURLLineEdit->text();
 
     // Throw a message box when video path is blank
